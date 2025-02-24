@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2FA Authentication</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .screen {
+            display: none;
+        }
+        .active {
+            display: block;
+        }
+        .qr-code {
+            max-width: 200px;
+            margin: 20px 0;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px 0;
+        }
+        .error {
+            color: red;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #ffe6e6;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            color: green;
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e6ffe6;
+            border-radius: 4px;
+            display: none;
+        }
+        .token-input {
+            font-size: 18px;
+            letter-spacing: 2px;
+            text-align: center;
+            width: 150px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Initial Login/Register Screen -->
+        <div id="loginScreen" class="screen active">
+            <h2>Login or Register</h2>
+            <div class="input-group">
+                <input type="text" id="username" placeholder="Username">
+                <button onclick="handleLoginInit()">Login</button>
+                <button onclick="handleRegister()">Register</button>
+            </div>
+        </div>
+
+        <!-- 2FA Setup Screen -->
+        <div id="setupScreen" class="screen">
+            <h2>Setup 2FA</h2>
+            <p>1. Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.):</p>
+            <img id="qrCode" class="qr-code" src="" alt="QR Code">
+            <p>2. Enter the 6-digit code from your authenticator app:</p>
+            <div class="input-group">
+                <input type="text" id="setupToken" class="token-input" placeholder="000000" maxlength="6" pattern="[0-9]*">
+                <button onclick="handleSetupVerify()">Verify Code</button>
+            </div>
+        </div>
+
+        <!-- 2FA Verification Screen -->
+        <div id="verifyScreen" class="screen">
+            <h2>2FA Verification</h2>
+            <p>Enter the 6-digit code from your authenticator app:</p>
+            <div class="input-group">
+                <input type="text" id="verifyToken" class="token-input" placeholder="000000" maxlength="6" pattern="[0-9]*">
+                <button onclick="handleVerify()">Verify Code</button>
+            </div>
+        </div>
+
+        <!-- Success Screen -->
+        <div id="successScreen" class="screen">
+            <h2>Successfully Authenticated! 🎉</h2>
+            <p>Your account is now secured with 2FA.</p>
+            <button onclick="handleLogout()">Logout</button>
+        </div>
+
+        <div id="errorMessage" class="error"></div>
+        <div id="successMessage" class="success"></div>
+    </div>
+
+    <script>
+        const socket = io();
+        let currentUsername = '';
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(screen => screen.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.style.display = 'block';
+            errorDiv.textContent = message;
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+                errorDiv.textContent = '';
+            }, 3000);
+        }
+
+        function showSuccess(message) {
+            const successDiv = document.getElementById('successMessage');
+            successDiv.style.display = 'block';
+            successDiv.textContent = message;
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+                successDiv.textContent = '';
+            }, 3000);
+        }
+
+        // Add input validation for token fields
+        ['setupToken', 'verifyToken'].forEach(id => {
+            const input = document.getElementById(id);
+            input.addEventListener('input', (e) => {
+                e.target.value = e.target.value.replace(/[^0-9]/g, '').slice(0, 6);
+            });
+        });
+
+        function handleLoginInit() {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                showError('Please enter a username');
+                return;
+            }
+            currentUsername = username;
+            socket.emit('login-init', username);
+        }
+
+        function handleRegister() {
+            const username = document.getElementById('username').value;
+            if (!username) {
+                showError('Please enter a username');
+                return;
+            }
+            currentUsername = username;
+            socket.emit('register', username);
+        }
+
+        function handleSetupVerify() {
+            const token = document.getElementById('setupToken').value;
+            if (!token || token.length !== 6) {
+                showError('Please enter a valid 6-digit code');
+                return;
+            }
+            socket.emit('verify-2fa', {
+                username: currentUsername,
+                token: token,
+                isSetup: true
+            });
+        }
+
+        function handleVerify() {
+            const token = document.getElementById('verifyToken').value;
+            if (!token || token.length !== 6) {
+                showError('Please enter a valid 6-digit code');
+                return;
+            }
+            socket.emit('verify-2fa', {
+                username: currentUsername,
+                token: token
+            });
+        }
+
+        function handleLogout() {
+            currentUsername = '';
+            showScreen('loginScreen');
+            showSuccess('Logged out successfully');
+        }
+
+        // Socket event handlers
+        socket.on('registration-success', ({ username, qrCode }) => {
+            document.getElementById('qrCode').src = qrCode;
+            showScreen('setupScreen');
+            showSuccess('Registration successful! Please set up 2FA');
+        });
+
+        socket.on('needs-2fa-setup', ({ qrCode }) => {
+            document.getElementById('qrCode').src = qrCode;
+            showScreen('setupScreen');
+        });
+
+        socket.on('needs-2fa-verification', () => {
+            showScreen('verifyScreen');
+        });
+
+        socket.on('auth-success', () => {
+            showScreen('successScreen');
+            showSuccess('Authentication successful!');
+        });
+
+        socket.on('auth-failure', (message) => {
+            showError(message || 'Invalid code. Please try again.');
+            // Clear the token input fields
+            document.getElementById('setupToken').value = '';
+            document.getElementById('verifyToken').value = '';
+        });
+
+        socket.on('error', (message) => {
+            showError(message);
+        });
+    </script>
+</body>
+</html>
